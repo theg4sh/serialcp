@@ -6,13 +6,23 @@ set baudrate [lindex $argv 1]
 set infile [lindex $argv 2]
 set outfile [lindex $argv 3]
 
-set username [lindex $argv 4]
-set password [lindex $argv 5]
+set direction [lindex $argv 4]
+
+set username [lindex $argv 5]
+set password [lindex $argv 6]
 
 set control_a \x01
 set control_c \x03
 
 set promptmsg "ubuntu\@*:~\$ "
+
+
+# This flag is set if loginned byself
+set selflogged "0"
+# Flag is set when screen is attached to existed session
+set screenattached "0"
+
+
 
 proc login {user pass} {
 	send "\r"
@@ -22,16 +32,16 @@ proc login {user pass} {
 	send "$pass\r"
 }
 
-proc transfer {filein fileout} {
+proc transfer {filelocal fileremote} {
 	global promptmsg
 	global control_c
 	send "\r"
 	expect {
 		"$promptmsg" {
 			send_user "Transferring file...\r\n"
-			send "cat > \"$fileout.gz\" << EOFEOFEOF\r"
+			send "cat > \"$fileremote.gz\" << EOFEOFEOF\r"
 			expect -ex "> "
-			send [exec bash "-c" "cat \"$filein\" | gzip - | base64 -"]
+			send [exec bash "-c" "cat \"$filelocal\" | gzip - | base64 -"]
 			send "\r"
 			sleep 2
 			expect -ex "> "
@@ -41,15 +51,37 @@ proc transfer {filein fileout} {
 			expect "$promptmsg"
 			send $control_c
 			expect "$promptmsg" {
-				send "base64 -d \"$fileout.gz\" | gzip -d - > \"$fileout\"\r"
+				send "base64 -d \"$fileremote.gz\" | gzip -d - > \"$fileremote\"\r"
 				expect "$promptmsg"
-				send "rm -f \"$fileout.gz\"\r"
+				send "rm -f \"$fileremote.gz\"\r"
 				expect "$promptmsg"
 				send_user "Transfer complete\r\n"
 			}
 		}
 		eof { send_user "Transfer failed\r\n"; }
-		timeout { send_user "Transfer failed\r\n"; abort }
+		timeout { send_user "Transfer failed\r\n"; exit 1 }
+	}
+}
+
+proc receive {filelocal fileremote} {
+	global promptmsg
+	global control_c
+	send "\r"
+	expect {
+		"$promptmsg" {
+			send_user "Receiving file...\r\n"
+			# Start capturing
+			exec rm "-f" "$filelocal"
+			log_file "$filelocal"
+			send "gzip -c \"$fileremote\" | base64\r"
+			expect "$promptmsg"
+			# Stop capturing
+			log_file
+			exec sync
+			send_user "Receving completed\r\n"
+		}
+		eof { send_user "Receiving failed\r\n"; }
+		timeout { send_user "Receiving failed\r\n";  exit 1 }
 	}
 }
 
@@ -61,14 +93,26 @@ proc screen_exit {} {
 	send "y"
 }
 
-if {[llength $argv] != 6} {
-	send_user "Usage: scriptname <device> <baudrate> <in_file> <out_file> <username> <password>\n"
+proc screen_dettach {} {
+	global control_a
+	send $control_a
+	send "d"
+}
+
+if {[llength $argv] != 7} {
+	send_user "Usage: scriptname <device> <baudrate> <in_file> <out_file> <destination> <username> <password>\n"
+	exit 1
+}
+
+if {"$direction" != "out" && "$direction" != "in"} {
+	send_user "Direction could be only 'in' or 'out'\n"
 	exit 1
 }
 
 set timeout 1
 
-spawn screen $device $baudrate
+spawn screen -x -R -- $device $baudrate
+# TODO: detect screen was attached
 
 send "\r"
 expect -exact "> " {
@@ -77,21 +121,36 @@ expect -exact "> " {
 }
 
 send $control_c
-
 expect "login: " {
 	send $control_c
 	login "$username" "$password"
 	expect "Login is incorrect" abort
+	set selflogged "1"
 }
 
-send $control_c
-expect "$promptmsg"
-transfer "$infile" "$outfile"
+if {"$direction" == "out"} {
+	send $control_c
+	expect "$promptmsg"
+	transfer "$infile" "$outfile"
+}
+
+if {"$direction" == "in"} {
+	send $control_c
+	expect "$promptmsg"
+	receive "$infile" "$outfile"
+}
+
 
 send $control_c
 expect "$promptmsg"
-send "exit\r"
+if {"$selflogged" == "1"} {
+	send "exit\r"
+}
 expect "login:"
-screen_exit
+if {"$screenattached" == "1"} {
+	screen_dettach
+} else {
+	screen_exit
+}
 expect oef
 exit 0
