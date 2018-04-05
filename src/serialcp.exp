@@ -1,0 +1,97 @@
+#!/usr/bin/expect -f
+
+set device [lindex $argv 0]
+set baudrate [lindex $argv 1]
+
+set infile [lindex $argv 2]
+set outfile [lindex $argv 3]
+
+set username [lindex $argv 4]
+set password [lindex $argv 5]
+
+set control_a \x01
+set control_c \x03
+
+set promptmsg "ubuntu\@*:~\$ "
+
+proc login {user pass} {
+	send "\r"
+	expect "login:"
+	send "$user\r"
+	expect "Password:"
+	send "$pass\r"
+}
+
+proc transfer {filein fileout} {
+	global promptmsg
+	global control_c
+	send "\r"
+	expect {
+		"$promptmsg" {
+			send_user "Transferring file...\r\n"
+			send "cat > \"$fileout.gz\" << EOFEOFEOF\r"
+			expect -ex "> "
+			send [exec bash "-c" "cat \"$filein\" | gzip - | base64 -"]
+			send "\r"
+			sleep 2
+			expect -ex "> "
+			send "EOFEOFEOF\r"
+			expect "$promptmsg"
+			send "sync\r"
+			expect "$promptmsg"
+			send $control_c
+			expect "$promptmsg" {
+				send "base64 -d \"$fileout.gz\" | gzip -d - > \"$fileout\"\r"
+				expect "$promptmsg"
+				send "rm -f \"$fileout.gz\"\r"
+				expect "$promptmsg"
+				send_user "Transfer complete\r\n"
+			}
+		}
+		eof { send_user "Transfer failed\r\n"; }
+		timeout { send_user "Transfer failed\r\n"; abort }
+	}
+}
+
+proc screen_exit {} {
+	global control_a
+	send $control_a
+	send "\\"
+	expect "Really quit"
+	send "y"
+}
+
+if {[llength $argv] != 6} {
+	send_user "Usage: scriptname <device> <baudrate> <in_file> <out_file> <username> <password>\n"
+	exit 1
+}
+
+set timeout 1
+
+spawn screen $device $baudrate
+
+send "\r"
+expect -exact "> " {
+	send $control_c
+	#send "EOFEOFEOF"
+}
+
+send $control_c
+
+expect "login: " {
+	send $control_c
+	login "$username" "$password"
+	expect "Login is incorrect" abort
+}
+
+send $control_c
+expect "$promptmsg"
+transfer "$infile" "$outfile"
+
+send $control_c
+expect "$promptmsg"
+send "exit\r"
+expect "login:"
+screen_exit
+expect oef
+exit 0
