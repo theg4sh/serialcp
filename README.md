@@ -39,4 +39,4 @@ Temporary, an order of arguemnts of local and remote filename is fixed as it des
 ### TODO
 
  - User-friendly argument passing.
- - Stop killing an existing session in _screen_.
+ - Stop killing an existing _screen_'s session when transfer is done.
