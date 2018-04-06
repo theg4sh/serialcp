@@ -3,9 +3,13 @@
 Transfering files between your computer and another computer using usart connection
 
 ## Requirements
-On both system require to be installed the following tools: `base64` `gzip`
+On both systems require to be installed the following tools: `base64` `gzip`
 
-On system where _serialcp_ will run need also: `expect` `screen`
+On system where you going to use _serialcp_ also needs to be installed: `expect` `screen`
+
+```
+apt-get install -y expect screen gzip
+```
 
 ### Remote OS support
 
